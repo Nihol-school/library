@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Учёт книг — библиотека</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --paper:#F7F2E7;
+    --paper-dark:#EFE7D6;
+    --ink:#2B2A28;
+    --ink-soft:#6B655A;
+    --line:#D8CDB6;
+    --green:#3F6B4F;
+    --green-soft:#E4EEE4;
+    --brick:#9C3D34;
+    --brick-soft:#F5E5E1;
+    --brass:#B8923D;
+    --brass-dark:#93731F;
+    --card-shadow: 0 1px 0 rgba(43,42,40,0.06), 0 6px 16px rgba(43,42,40,0.06);
+    --serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+    --mono: 'SFMono-Regular', Consolas, 'Courier New', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--sans);
+    padding-bottom:60px;
+  }
+  header{
+    background:var(--ink);
+    color:var(--paper);
+    padding:22px 20px 26px;
+    position:relative;
+    overflow:hidden;
+  }
+  header::after{
+    content:"";
+    position:absolute;
+    left:0;right:0;bottom:0;
+    height:6px;
+    background:repeating-linear-gradient(90deg,var(--brass) 0 10px, transparent 10px 20px);
+    opacity:.5;
+  }
+  header h1{
+    font-family:var(--serif);
+    font-size:clamp(22px,5vw,30px);
+    margin:0 0 4px;
+    letter-spacing:.3px;
+  }
+  header p{
+    margin:0;
+    color:#C9C2B2;
+    font-size:14px;
+  }
+  .wrap{
+    max-width:960px;
+    margin:0 auto;
+    padding:18px 16px 0;
+  }
+  .cards{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:10px;
+    margin:-30px 0 18px;
+    position:relative;
+    z-index:2;
+  }
+  .stat{
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px 14px;
+    box-shadow:var(--card-shadow);
+  }
+  .stat .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);}
+  .stat .val{font-family:var(--mono);font-size:28px;font-weight:800;margin-top:3px;letter-spacing:-.3px;}
+  .stat .val .unit{font-size:.42em;font-weight:700;color:var(--ink-soft);margin-left:2px;}
+  .stat.debt .val{color:var(--brick);}
+  .stat.paid .val{color:var(--green);}
+
+  .toolbar{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-bottom:16px;
+    align-items:center;
+  }
+  .toolbar input[type=text]{
+    flex:1;
+    min-width:140px;
+    padding:9px 12px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    font-size:14px;
+  }
+  select{
+    padding:9px 10px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    font-size:14px;
+  }
+  .btn{
+    border:none;
+    border-radius:8px;
+    padding:9px 14px;
+    font-size:14px;
+    cursor:pointer;
+    font-weight:600;
+    font-family:var(--sans);
+  }
+  .btn-brass{background:var(--brass);color:#fff;}
+  .btn-brass:hover{background:var(--brass-dark);}
+  .btn-outline{background:transparent;border:1px solid var(--line);color:var(--ink);}
+  .btn-outline:hover{background:var(--paper-dark);}
+  .btn-green{background:var(--green);color:#fff;}
+  .btn-brick{background:var(--brick);color:#fff;}
+  .btn-sm{padding:5px 10px;font-size:12px;border-radius:6px;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+
+  .record{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:10px;
+    margin-bottom:14px;
+    box-shadow:var(--card-shadow);
+    position:relative;
+    overflow:hidden;
+  }
+  .record::before{
+    content:"";
+    position:absolute;top:0;left:0;right:0;height:3px;
+    background:repeating-linear-gradient(90deg,var(--brass) 0 8px, transparent 8px 16px);
+    opacity:.55;
+  }
+  .rec-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:10px;
+    padding:14px 16px 10px;
+    border-bottom:1px dashed var(--line);
+  }
+  .rec-head h3{
+    font-family:var(--serif);
+    margin:0 0 2px;
+    font-size:18px;
+  }
+  .rec-head .meta{font-size:12.5px;color:var(--ink-soft);}
+  .rec-head .meta span{margin-right:10px;}
+  .rec-actions{display:flex;gap:6px;}
+  .icon-btn{
+    background:none;border:none;cursor:pointer;
+    color:var(--ink-soft);font-size:15px;padding:3px 5px;
+    border-radius:5px;
+  }
+  .icon-btn:hover{background:var(--paper-dark);color:var(--brick);}
+
+  .book-line{
+    padding:10px 16px;
+    border-bottom:1px solid #F0EBDE;
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:6px 12px;
+  }
+  .book-line:last-child{border-bottom:none;}
+  .book-title{
+    font-weight:600;
+    flex:1 1 180px;
+    min-width:120px;
+  }
+  .dots{
+    flex:1 1 30px;
+    border-bottom:1px dotted var(--line);
+    height:1px;
+    min-width:16px;
+  }
+  .book-nums{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--ink-soft);
+    white-space:nowrap;
+  }
+  .book-nums b{color:var(--ink);}
+  .sum{font-size:1.25em;font-weight:800;color:var(--ink);}
+  .badge{font-size:13px !important;padding:3px 10px !important;}
+  .badge b{font-size:1.1em;}
+  .progress{
+    width:100%;
+    height:6px;
+    background:var(--paper-dark);
+    border-radius:4px;
+    overflow:hidden;
+    margin-top:4px;
+    flex-basis:100%;
+  }
+  .progress > div{height:100%;background:var(--green);}
+  .badge{
+    font-size:11px;
+    font-weight:700;
+    padding:2px 8px;
+    border-radius:20px;
+  }
+  .badge.debt{background:var(--brick-soft);color:var(--brick);}
+  .badge.paid{background:var(--green-soft);color:var(--green);}
+
+  .rec-foot{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:10px 16px 14px;
+    font-size:13px;
+  }
+  .rec-foot .total{font-family:var(--mono);font-weight:800;font-size:16px;}
+  .rec-foot .total-sum{font-family:var(--mono);font-weight:800;font-size:16px;}
+
+  .empty{
+    text-align:center;
+    padding:50px 20px;
+    color:var(--ink-soft);
+  }
+  .empty .big{font-size:40px;margin-bottom:6px;}
+
+  /* Modal */
+  .overlay{
+    position:fixed;inset:0;background:rgba(43,42,40,.45);
+    display:none;align-items:flex-start;justify-content:center;
+    padding:24px 14px;overflow-y:auto;z-index:50;
+  }
+  .overlay.show{display:flex;}
+  .modal{
+    background:var(--paper);
+    border-radius:12px;
+    max-width:520px;width:100%;
+    padding:20px;
+    box-shadow:0 20px 50px rgba(0,0,0,.25);
+  }
+  .modal h2{font-family:var(--serif);margin:0 0 14px;font-size:20px;}
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em;}
+  .field input, .field select{
+    width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;background:#fff;
+  }
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .bookrow{
+    display:grid;
+    grid-template-columns:1fr 70px 90px auto;
+    gap:8px;align-items:end;margin-bottom:8px;
+  }
+  .bookrow input{width:100%;padding:8px;border:1px solid var(--line);border-radius:7px;font-size:14px;}
+  .rm-row{background:none;border:none;color:var(--brick);font-size:18px;cursor:pointer;padding:4px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+  .hint{font-size:12px;color:var(--ink-soft);margin-top:-4px;margin-bottom:10px;}
+
+  footer.appfoot{
+    text-align:center;color:var(--ink-soft);font-size:12px;padding:20px;
+  }
+  @media (max-width:520px){
+    .bookrow{grid-template-columns:1fr 60px 1fr;grid-template-areas:"t t t" "q p r";}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap" style="padding-top:0;padding-bottom:0;">
+    <h1>📚 Учёт книг библиотеки</h1>
+    <p>Приход книг классам и оплата — всё в одном месте</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="cards" id="stats"></div>
+
+  <div class="toolbar">
+    <input type="text" id="search" placeholder="Поиск: класс, учитель, книга…">
+    <select id="filterDebt">
+      <option value="all">Все записи</option>
+      <option value="debt">Только с долгом</option>
+      <option value="paid">Полностью оплачено</option>
+    </select>
+    <button class="btn btn-brass" id="addBtn">+ Новая запись</button>
+    <button class="btn btn-outline" id="exportBtn">⬇ Excel-отчёт</button>
+  </div>
+
+  <div id="loading" style="text-align:center;color:var(--ink-soft);padding:30px;">Загрузка данных…</div>
+  <div id="records"></div>
+</div>
+
+<footer class="appfoot">Данные хранятся в базе Firebase и обновляются в реальном времени на всех устройствах · <span id="resetLink" style="text-decoration:underline;cursor:pointer;">очистить все данные</span></footer>
+
+<!-- Add record modal -->
+<div class="overlay" id="addOverlay">
+  <div class="modal">
+    <h2>Новая запись выдачи</h2>
+    <div class="row2">
+      <div class="field"><label>Класс</label><input type="text" id="fClass" placeholder="напр. 5А"></div>
+      <div class="field"><label>Дата</label><input type="date" id="fDate"></div>
+    </div>
+    <div class="field"><label>Учитель (Фамилия Имя)</label><input type="text" id="fTeacher" placeholder="Иванова Анна"></div>
+
+    <label style="display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;text-transform:uppercase;">Книги</label>
+    <div id="bookRows"></div>
+    <button class="btn btn-outline btn-sm" id="addRowBtn" type="button">+ добавить книгу</button>
+
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelAdd">Отмена</button>
+      <button class="btn btn-brass" id="saveAdd">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Payment modal -->
+<div class="overlay" id="payOverlay">
+  <div class="modal" style="max-width:380px;">
+    <h2>Приём оплаты</h2>
+    <p class="hint" id="payBookInfo"></p>
+    <div class="row2">
+      <div class="field"><label>Кол-во (шт)</label><input type="number" id="payQty" min="1"></div>
+      <div class="field"><label>Сумма (сум)</label><input type="number" id="payAmount" min="0" style="font-size:20px;font-weight:800;font-family:var(--mono);"></div>
+    </div>
+    <div class="field"><label>Дата оплаты</label><input type="date" id="payDate"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelPay">Отмена</button>
+      <button class="btn btn-green" id="savePay">Записать оплату</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let records = [];
+let bookRowCount = 0;
+let payingCtx = null; // {recordId, bookId, price, remainingQty}
+
+const el = id => document.getElementById(id);
+const fmt = n => Number(n||0).toLocaleString('ru-RU');
+const todayStr = () => new Date().toISOString().slice(0,10);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAQELWoXIRZBYrEH8VLnmQ5jIvYlfV2C_c",
+  authDomain: "libraryproject-9f8f2.firebaseapp.com",
+  projectId: "libraryproject-9f8f2",
+  storageBucket: "libraryproject-9f8f2.firebasestorage.app",
+  messagingSenderId: "116789043908",
+  appId: "1:116789043908:web:0b4a7e5f56ee8b04149f91"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const recordsDoc = db.collection('library').doc('records');
+
+function listenData(){
+  recordsDoc.onSnapshot(
+    doc=>{
+      el('loading').style.display = 'none';
+      records = (doc.exists && doc.data().data) ? doc.data().data : [];
+      render();
+    },
+    err=>{
+      el('loading').style.display = 'none';
+      console.error('Firestore error', err);
+      el('records').innerHTML = `<div class="empty">⚠️ Не удалось подключиться к базе данных.<br>Проверьте интернет и правила доступа Firestore (Test mode должен быть включён).</div>`;
+    }
+  );
+}
+
+async function saveData(){
+  try{
+    await recordsDoc.set({data: records});
+  }catch(e){
+    console.error('Save error', e);
+    alert('Не удалось сохранить данные в базу. Проверьте интернет-соединение и правила доступа Firestore.');
+  }
+}
+
+function bookCalc(book){
+  const sum = book.qty * book.price;
+  const paidQty = (book.payments||[]).reduce((a,p)=>a+p.qty,0);
+  const paidSum = (book.payments||[]).reduce((a,p)=>a+p.amount,0);
+  return {sum, paidQty, paidSum, debtQty: book.qty-paidQty, debtSum: sum-paidSum};
+}
+
+function recordTotals(rec){
+  let sum=0,paidSum=0,debtSum=0;
+  rec.books.forEach(b=>{
+    const c = bookCalc(b);
+    sum+=c.sum; paidSum+=c.paidSum; debtSum+=c.debtSum;
+  });
+  return {sum,paidSum,debtSum};
+}
+
+function renderStats(){
+  let totalSum=0, totalPaid=0, totalDebt=0, debtRecords=0;
+  records.forEach(r=>{
+    const t = recordTotals(r);
+    totalSum+=t.sum; totalPaid+=t.paidSum; totalDebt+=t.debtSum;
+    if(t.debtSum>0) debtRecords++;
+  });
+  el('stats').innerHTML = `
+    <div class="stat"><div class="lbl">Всего выдано</div><div class="val">${fmt(totalSum)}<span class="unit">сум</span></div></div>
+    <div class="stat paid"><div class="lbl">Оплачено</div><div class="val">${fmt(totalPaid)}<span class="unit">сум</span></div></div>
+    <div class="stat debt"><div class="lbl">Долг всего</div><div class="val">${fmt(totalDebt)}<span class="unit">сум</span></div></div>
+    <div class="stat"><div class="lbl">Записей с долгом</div><div class="val">${debtRecords}</div></div>
+  `;
+}
+
+function render(){
+  renderStats();
+  const search = el('search').value.trim().toLowerCase();
+  const filter = el('filterDebt').value;
+  const box = el('records');
+
+  let list = records.slice().sort((a,b)=> b.date.localeCompare(a.date));
+
+  list = list.filter(r=>{
+    const t = recordTotals(r);
+    if(filter==='debt' && t.debtSum<=0) return false;
+    if(filter==='paid' && t.debtSum>0) return false;
+    if(search){
+      const hay = (r.className+' '+r.teacher+' '+r.books.map(b=>b.title).join(' ')).toLowerCase();
+      if(!hay.includes(search)) return false;
+    }
+    return true;
+  });
+
+  if(list.length===0){
+    box.innerHTML = `<div class="empty"><div class="big">🗂️</div>Записей пока нет.<br>Нажмите «+ Новая запись», чтобы добавить первую выдачу книг.</div>`;
+    return;
+  }
+
+  box.innerHTML = list.map(rec=>{
+    const t = recordTotals(rec);
+    const bookLines = rec.books.map(b=>{
+      const c = bookCalc(b);
+      const pct = b.qty>0 ? Math.round((c.paidQty/b.qty)*100) : 0;
+      const isPaid = c.debtQty<=0;
+      return `
+        <div class="book-line">
+          <div class="book-title">${escapeHtml(b.title)}</div>
+          <div class="dots"></div>
+          <div class="book-nums"><b>${c.paidQty}</b>/${b.qty} шт · <span class="sum">${fmt(c.paidSum)} / ${fmt(c.sum)}</span> сум</div>
+          <span class="badge ${isPaid?'paid':'debt'}">${isPaid?'оплачено':'долг <b>'+fmt(c.debtSum)+'</b> сум'}</span>
+          ${!isPaid ? `<button class="btn btn-green btn-sm" onclick="openPay('${rec.id}','${b.id}')">Принять оплату</button>` : ''}
+          <div class="progress"><div style="width:${pct}%"></div></div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="record">
+        <div class="rec-head">
+          <div>
+            <h3>${escapeHtml(rec.className)} · ${escapeHtml(rec.teacher)}</h3>
+            <div class="meta"><span>📅 ${rec.date}</span><span>${rec.books.length} назв. книг</span></div>
+          </div>
+          <div class="rec-actions">
+            <button class="icon-btn" onclick="deleteRecord('${rec.id}')" title="Удалить запись">✕</button>
+          </div>
+        </div>
+        ${bookLines}
+        <div class="rec-foot">
+          <span>Итого по записи: <span class="total-sum">${fmt(t.sum)} сум</span></span>
+          <span class="total" style="color:${t.debtSum>0?'var(--brick)':'var(--green)'}">${t.debtSum>0? 'Долг: '+fmt(t.debtSum)+' сум' : 'Оплачено полностью'}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// --- Add record modal ---
+function addBookRow(prefill){
+  bookRowCount++;
+  const id = 'br'+bookRowCount;
+  const div = document.createElement('div');
+  div.className='bookrow';
+  div.id=id;
+  div.innerHTML = `
+    <input type="text" placeholder="Название книги" class="bt-title" style="grid-area:t">
+    <input type="number" placeholder="Кол-во" min="1" class="bt-qty" style="grid-area:q">
+    <input type="number" placeholder="Цена/шт" min="0" class="bt-price" style="grid-area:p">
+    <button class="rm-row" type="button" onclick="document.getElementById('${id}').remove()" style="grid-area:r">×</button>
+  `;
+  el('bookRows').appendChild(div);
+}
+
+el('addBtn').onclick = ()=>{
+  el('fClass').value='';
+  el('fTeacher').value='';
+  el('fDate').value = todayStr();
+  el('bookRows').innerHTML='';
+  bookRowCount=0;
+  addBookRow();
+  el('addOverlay').classList.add('show');
+};
+el('cancelAdd').onclick = ()=> el('addOverlay').classList.remove('show');
+el('addRowBtn').onclick = ()=> addBookRow();
+
+el('saveAdd').onclick = async ()=>{
+  const className = el('fClass').value.trim();
+  const teacher = el('fTeacher').value.trim();
+  const date = el('fDate').value || todayStr();
+  if(!className || !teacher){ alert('Укажите класс и учителя'); return; }
+
+  const rows = Array.from(document.querySelectorAll('#bookRows .bookrow'));
+  const books = [];
+  for(const row of rows){
+    const title = row.querySelector('.bt-title').value.trim();
+    const qty = parseInt(row.querySelector('.bt-qty').value);
+    const price = parseFloat(row.querySelector('.bt-price').value);
+    if(title && qty>0 && price>=0){
+      books.push({id: uid(), title, qty, price, payments: []});
+    }
+  }
+  if(books.length===0){ alert('Добавьте хотя бы одну книгу с корректным количеством и ценой'); return; }
+
+  records.push({id: uid(), className, teacher, date, books, createdAt: Date.now()});
+  await saveData();
+  el('addOverlay').classList.remove('show');
+  render();
+};
+
+// --- Payment modal ---
+function openPay(recordId, bookId){
+  const rec = records.find(r=>r.id===recordId);
+  const book = rec.books.find(b=>b.id===bookId);
+  const c = bookCalc(book);
+  payingCtx = {recordId, bookId, price: book.price, remainingQty: c.debtQty};
+  el('payBookInfo').textContent = `${book.title} — осталось оплатить ${c.debtQty} шт (${fmt(c.debtSum)} сум)`;
+  el('payQty').value = c.debtQty;
+  el('payQty').max = c.debtQty;
+  el('payAmount').value = c.debtSum;
+  el('payDate').value = todayStr();
+  el('payOverlay').classList.add('show');
+}
+window.openPay = openPay;
+
+el('cancelPay').onclick = ()=> el('payOverlay').classList.remove('show');
+
+el('payQty').oninput = ()=>{
+  if(!payingCtx) return;
+  const q = parseFloat(el('payQty').value)||0;
+  el('payAmount').value = Math.round(q * payingCtx.price * 100)/100;
+};
+
+el('savePay').onclick = async ()=>{
+  if(!payingCtx) return;
+  const qty = parseFloat(el('payQty').value);
+  const amount = parseFloat(el('payAmount').value);
+  const date = el('payDate').value || todayStr();
+  if(!(qty>0) || amount<0){ alert('Проверьте количество и сумму'); return; }
+  if(qty > payingCtx.remainingQty){ if(!confirm('Количество больше оставшегося долга. Всё равно записать?')) return; }
+
+  const rec = records.find(r=>r.id===payingCtx.recordId);
+  const book = rec.books.find(b=>b.id===payingCtx.bookId);
+  book.payments = book.payments || [];
+  book.payments.push({qty, amount, date});
+  await saveData();
+  el('payOverlay').classList.remove('show');
+  payingCtx=null;
+  render();
+};
+
+async function deleteRecord(id){
+  if(!confirm('Удалить эту запись целиком? Действие необратимо.')) return;
+  records = records.filter(r=>r.id!==id);
+  await saveData();
+  render();
+}
+window.deleteRecord = deleteRecord;
+
+el('resetLink').onclick = async ()=>{
+  if(!confirm('Удалить ВСЕ данные без возможности восстановления?')) return;
+  records = [];
+  await saveData();
+  render();
+};
+
+el('search').oninput = render;
+el('filterDebt').onchange = render;
+
+// --- Excel export ---
+el('exportBtn').onclick = ()=>{
+  if(records.length===0){ alert('Пока нет данных для отчёта'); return; }
+
+  const mainRows = [['Дата','Класс','Учитель','Книга','Цена (сум)','Кол-во','Сумма (сум)','Оплачено (шт)','Оплачено (сум)','Долг (шт)','Долг (сум)']];
+  const payRows = [['Дата оплаты','Класс','Учитель','Книга','Кол-во','Сумма (сум)']];
+  const summaryMap = {};
+
+  records.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(rec=>{
+    rec.books.forEach(b=>{
+      const c = bookCalc(b);
+      mainRows.push([rec.date, rec.className, rec.teacher, b.title, b.price, b.qty, c.sum, c.paidQty, c.paidSum, c.debtQty, c.debtSum]);
+      (b.payments||[]).forEach(p=>{
+        payRows.push([p.date, rec.className, rec.teacher, b.title, p.qty, p.amount]);
+      });
+      const key = rec.className+' | '+rec.teacher;
+      if(!summaryMap[key]) summaryMap[key] = {className:rec.className, teacher:rec.teacher, sum:0, paid:0, debt:0};
+      summaryMap[key].sum += c.sum;
+      summaryMap[key].paid += c.paidSum;
+      summaryMap[key].debt += c.debtSum;
+    });
+  });
+
+  const totalRow = ['','','','ИТОГО','','',
+    mainRows.slice(1).reduce((a,r)=>a+r[6],0),
+    mainRows.slice(1).reduce((a,r)=>a+r[7],0),
+    mainRows.slice(1).reduce((a,r)=>a+r[8],0),
+    mainRows.slice(1).reduce((a,r)=>a+r[9],0),
+    mainRows.slice(1).reduce((a,r)=>a+r[10],0)];
+  mainRows.push(totalRow);
+
+  const summaryRows = [['Класс','Учитель','Сумма (сум)','Оплачено (сум)','Долг (сум)']];
+  Object.values(summaryMap).sort((a,b)=> b.debt-a.debt).forEach(s=>{
+    summaryRows.push([s.className, s.teacher, s.sum, s.paid, s.debt]);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet(mainRows);
+  ws1['!cols'] = [{wch:11},{wch:8},{wch:20},{wch:26},{wch:9},{wch:8},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10}];
+  const ws2 = XLSX.utils.aoa_to_sheet(summaryRows);
+  ws2['!cols'] = [{wch:8},{wch:22},{wch:12},{wch:12},{wch:12}];
+  const ws3 = XLSX.utils.aoa_to_sheet(payRows);
+  ws3['!cols'] = [{wch:12},{wch:8},{wch:20},{wch:26},{wch:8},{wch:10}];
+
+  XLSX.utils.book_append_sheet(wb, ws1, 'Отчёт');
+  XLSX.utils.book_append_sheet(wb, ws2, 'Сводка по классам');
+  XLSX.utils.book_append_sheet(wb, ws3, 'История оплат');
+
+  const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  const blob = new Blob([wbout], {type:'application/octet-stream'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Отчёт библиотека ${todayStr()}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+listenData();
+</script>
+</body>
+</html>
