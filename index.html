@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Учёт книг — библиотека</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
@@ -596,9 +595,35 @@ el('resetLink').onclick = async ()=>{
 el('search').oninput = render;
 el('filterDebt').onchange = render;
 
-// --- Excel export ---
-el('exportBtn').onclick = ()=>{
+// --- Excel export (библиотека xlsx подгружается только сейчас, чтобы не тормозить открытие страницы) ---
+let xlsxLoading = null;
+function ensureXlsx(){
+  if(typeof XLSX !== 'undefined') return Promise.resolve();
+  if(xlsxLoading) return xlsxLoading;
+  xlsxLoading = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = resolve;
+    s.onerror = ()=>{ xlsxLoading=null; reject(new Error('load fail')); };
+    document.head.appendChild(s);
+  });
+  return xlsxLoading;
+}
+
+el('exportBtn').onclick = async ()=>{
   if(records.length===0){ alert('Пока нет данных для отчёта'); return; }
+  const btn = el('exportBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Готовим файл…';
+  try{
+    await ensureXlsx();
+  }catch(e){
+    alert('Не удалось загрузить модуль экспорта. Проверьте интернет-соединение и попробуйте ещё раз.');
+    btn.disabled = false;
+    btn.textContent = originalText;
+    return;
+  }
 
   const mainRows = [['Дата','Класс','Учитель','Книга','Цена (сум)','Кол-во','Сумма (сум)','Оплачено (шт)','Оплачено (сум)','Долг (шт)','Долг (сум)']];
   const payRows = [['Дата оплаты','Класс','Учитель','Книга','Кол-во','Сумма (сум)']];
@@ -654,6 +679,8 @@ el('exportBtn').onclick = ()=>{
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  btn.disabled = false;
+  btn.textContent = originalText;
 };
 
 listenData();
