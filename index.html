@@ -289,6 +289,7 @@
 
   <div class="toolbar">
     <input type="text" id="search" placeholder="Поиск: класс, учитель, книга…">
+    <select id="filterClass"><option value="all">Все классы</option></select>
     <select id="filterDebt">
       <option value="all">Все записи</option>
       <option value="debt">Только с долгом</option>
@@ -351,6 +352,7 @@ const el = id => document.getElementById(id);
 const fmt = n => Number(n||0).toLocaleString('ru-RU');
 const todayStr = () => new Date().toISOString().slice(0,10);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const canonClass = s => String(s||'').trim().replace(/\s+/g,'').toUpperCase();
 
 const firebaseConfig = {
   apiKey: "AIzaSyAQELWoXIRZBYrEH8VLnmQ5jIvYlfV2C_c",
@@ -425,15 +427,26 @@ function render(){
   const filter = el('filterDebt').value;
   const box = el('records');
 
+  // список классов для выпадающего меню
+  const classes = [...new Set(records.map(r=>r.className))].sort((a,b)=>a.localeCompare(b,'ru',{numeric:true}));
+  const classSel = el('filterClass');
+  const keepVal = classSel.value;
+  classSel.innerHTML = '<option value="all">Все классы</option>' + classes.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  if(classes.includes(keepVal)) classSel.value = keepVal;
+  const classFilter = classSel.value;
+
   let list = records.slice().sort((a,b)=> b.date.localeCompare(a.date));
 
   list = list.filter(r=>{
     const t = recordTotals(r);
     if(filter==='debt' && t.debtSum<=0) return false;
     if(filter==='paid' && t.debtSum>0) return false;
+    if(classFilter!=='all' && r.className!==classFilter) return false;
     if(search){
+      const hayNorm = canonClass(r.className);
+      const searchNorm = canonClass(el('search').value);
       const hay = (r.className+' '+r.teacher+' '+r.books.map(b=>b.title).join(' ')).toLowerCase();
-      if(!hay.includes(search)) return false;
+      if(!hay.includes(search) && !hayNorm.includes(searchNorm)) return false;
     }
     return true;
   });
@@ -513,7 +526,7 @@ el('cancelAdd').onclick = ()=> el('addOverlay').classList.remove('show');
 el('addRowBtn').onclick = ()=> addBookRow();
 
 el('saveAdd').onclick = async ()=>{
-  const className = el('fClass').value.trim();
+  const className = canonClass(el('fClass').value);
   const teacher = el('fTeacher').value.trim();
   const date = el('fDate').value || todayStr();
   if(!className || !teacher){ alert('Укажите класс и учителя'); return; }
@@ -594,6 +607,7 @@ el('resetLink').onclick = async ()=>{
 
 el('search').oninput = render;
 el('filterDebt').onchange = render;
+el('filterClass').onchange = render;
 
 // --- Excel export (библиотека xlsx подгружается только сейчас, чтобы не тормозить открытие страницы) ---
 let xlsxLoading = null;
