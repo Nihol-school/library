@@ -45,6 +45,33 @@
     background:repeating-linear-gradient(90deg,var(--brass) 0 10px, transparent 10px 20px);
     opacity:.5;
   }
+  .conn-status{
+    position:absolute;
+    top:0;right:0;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-size:12px;
+    font-weight:600;
+    padding:5px 11px;
+    border-radius:20px;
+    background:rgba(255,255,255,.08);
+    color:#D9D2C2;
+  }
+  .conn-status .dot{
+    width:8px;height:8px;border-radius:50%;
+    background:#C9A94A;
+    flex-shrink:0;
+  }
+  .conn-status.conn-online{color:#BFE0C8;}
+  .conn-status.conn-online .dot{background:#4CAF6D;box-shadow:0 0 6px #4CAF6D;}
+  .conn-status.conn-offline{color:#F0BDB6;}
+  .conn-status.conn-offline .dot{background:var(--brick);}
+  .conn-status.conn-connecting .dot{background:#C9A94A;animation:pulse 1.2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+  @media (max-width:520px){
+    .conn-status{position:static;display:inline-flex;margin-bottom:8px;}
+  }
   header h1{
     font-family:var(--serif);
     font-size:clamp(22px,5vw,30px);
@@ -276,7 +303,8 @@
 <body>
 
 <header>
-  <div class="wrap" style="padding-top:0;padding-bottom:0;">
+  <div class="wrap" style="padding-top:0;padding-bottom:0;position:relative;">
+    <span id="connStatus" class="conn-status conn-connecting"><span class="dot"></span>Подключение…</span>
     <h1>📚 Учёт книг библиотеки</h1>
     <p>Приход книг классам и оплата — всё в одном месте</p>
   </div>
@@ -366,20 +394,34 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const recordsCol = db.collection('libraryRecords');
 
+function setConnStatus(state){
+  const elx = el('connStatus');
+  elx.className = 'conn-status conn-'+state;
+  elx.innerHTML = '<span class="dot"></span>' + (
+    state==='online' ? 'Подключено' :
+    state==='offline' ? 'Нет соединения' :
+    'Подключение…'
+  );
+}
+
 function listenData(){
   recordsCol.onSnapshot(
     snap=>{
       el('loading').style.display = 'none';
+      setConnStatus(snap.metadata.fromCache ? 'offline' : 'online');
       records = snap.docs.map(d=>({id:d.id, ...d.data()}));
       render();
     },
     err=>{
       el('loading').style.display = 'none';
+      setConnStatus('offline');
       console.error('Firestore error', err);
       el('records').innerHTML = `<div class="empty">⚠️ Не удалось подключиться к базе данных.<br>Проверьте интернет и правила доступа Firestore (Test mode должен быть включён).</div>`;
     }
   );
 }
+window.addEventListener('offline', ()=> setConnStatus('offline'));
+window.addEventListener('online', ()=> setConnStatus('connecting'));
 
 function bookCalc(book){
   const sum = book.qty * book.price;
