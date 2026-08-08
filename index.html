@@ -285,6 +285,7 @@
   .bookrow .bf{display:flex;flex-direction:column;gap:3px;}
   .bookrow .bf label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);font-weight:600;}
   .bookrow .bf.f-title{flex:1 1 170px;}
+  .bt-hint{font-size:11px;color:var(--green);font-weight:600;margin-top:2px;display:block;min-height:14px;}
   .bookrow .bf.f-qty{flex:0 0 80px;}
   .bookrow .bf.f-price{flex:0 0 100px;}
   .bookrow input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;background:#fff;}
@@ -377,7 +378,7 @@
   <div class="modal">
     <h2>Новая запись выдачи</h2>
     <div class="row2">
-      <div class="field"><label>Класс</label><input type="text" id="fClass" placeholder="напр. 5А"></div>
+      <div class="field"><label>Класс</label><select id="fClass"><option value="">Выберите класс</option></select></div>
       <div class="field"><label>Дата</label><input type="date" id="fDate"></div>
     </div>
     <div class="field"><label>Учитель (Фамилия Имя)</label><input type="text" id="fTeacher" placeholder="Иванова Анна"></div>
@@ -423,6 +424,9 @@ const fmt = n => Number(n||0).toLocaleString('ru-RU');
 const todayStr = () => new Date().toISOString().slice(0,10);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const canonClass = s => String(s||'').trim().replace(/\s+/g,'').toUpperCase();
+
+const CLASSES = ['8А','8Б','8В','8Г','7А','7Б','7В','7Г','6А','6Б','5А','5Б','5В','5Г'];
+const BOOKS = ['Beginner A1','Elementary A2','Intermediate B1','Intermediate B2','Математика (РУС)','Математика (УЗБ)','SAT math and english','Students book'];
 
 const firebaseConfig = {
   apiKey: "AIzaSyAQELWoXIRZBYrEH8VLnmQ5jIvYlfV2C_c",
@@ -546,12 +550,11 @@ function render(){
   const filter = el('filterDebt').value;
   const box = el('records');
 
-  // список классов для выпадающего меню
-  const classes = [...new Set(records.map(r=>r.className))].sort((a,b)=>a.localeCompare(b,'ru',{numeric:true}));
+  // список классов для выпадающего меню — фиксированный список школы
   const classSel = el('filterClass');
   const keepVal = classSel.value;
-  classSel.innerHTML = '<option value="all">Все классы</option>' + classes.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  if(classes.includes(keepVal)) classSel.value = keepVal;
+  classSel.innerHTML = '<option value="all">Все классы</option>' + CLASSES.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  classSel.value = keepVal || 'all';
   const classFilter = classSel.value;
 
   let list = records.slice().sort((a,b)=> b.date.localeCompare(a.date));
@@ -617,6 +620,20 @@ function escapeHtml(s){
 }
 
 // --- Add record modal ---
+function bookOptionsHtml(){
+  return '<option value="">Выберите книгу</option>' + BOOKS.map(b=>`<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('');
+}
+
+function updateRowHint(row){
+  const cls = el('fClass').value;
+  const title = row.querySelector('.bt-title').value;
+  const hintEl = row.querySelector('.bt-hint');
+  if(!cls || !title){ hintEl.textContent=''; return; }
+  const rec = records.find(r=>r.className===cls);
+  const existing = rec ? rec.books.find(b=>b.title===title) : null;
+  hintEl.textContent = existing ? `уже есть ${existing.qty} шт — новое кол-во прибавится к этому` : 'новая книга для этого класса';
+}
+
 function addBookRow(prefill){
   bookRowCount++;
   const id = 'br'+bookRowCount;
@@ -624,15 +641,17 @@ function addBookRow(prefill){
   div.className='bookrow';
   div.id=id;
   div.innerHTML = `
-    <div class="bf f-title"><label>Название книги</label><input type="text" placeholder="напр. Букварь" class="bt-title"></div>
+    <div class="bf f-title"><label>Название книги</label><select class="bt-title">${bookOptionsHtml()}</select><span class="bt-hint"></span></div>
     <div class="bf f-qty"><label>Кол-во, шт</label><input type="number" placeholder="0" min="1" class="bt-qty"></div>
     <div class="bf f-price"><label>Цена/шт, сум</label><input type="number" placeholder="0" min="0" class="bt-price"></div>
     <button class="rm-row" type="button" onclick="document.getElementById('${id}').remove()" title="Удалить книгу">×</button>
   `;
   el('bookRows').appendChild(div);
+  div.querySelector('.bt-title').addEventListener('change', ()=>updateRowHint(div));
 }
 
 el('addBtn').onclick = ()=>{
+  el('fClass').innerHTML = '<option value="">Выберите класс</option>' + CLASSES.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   el('fClass').value='';
   el('fTeacher').value='';
   el('fDate').value = todayStr();
@@ -641,30 +660,51 @@ el('addBtn').onclick = ()=>{
   addBookRow();
   el('addOverlay').classList.add('show');
 };
+el('fClass').addEventListener('change', ()=>{
+  const rec = records.find(r=>r.className===el('fClass').value);
+  if(rec && rec.teacher) el('fTeacher').value = rec.teacher;
+  document.querySelectorAll('#bookRows .bookrow').forEach(updateRowHint);
+});
 el('cancelAdd').onclick = ()=> el('addOverlay').classList.remove('show');
 el('addRowBtn').onclick = ()=> addBookRow();
 
 el('saveAdd').onclick = async ()=>{
-  const className = canonClass(el('fClass').value);
+  const className = el('fClass').value;
   const teacher = el('fTeacher').value.trim();
   const date = el('fDate').value || todayStr();
-  if(!className || !teacher){ alert('Укажите класс и учителя'); return; }
+  if(!className){ alert('Выберите класс'); return; }
+  if(!teacher){ alert('Укажите учителя'); return; }
 
   const rows = Array.from(document.querySelectorAll('#bookRows .bookrow'));
-  const books = [];
+  const inputs = [];
   for(const row of rows){
-    const title = row.querySelector('.bt-title').value.trim();
+    const title = row.querySelector('.bt-title').value;
     const qty = parseInt(row.querySelector('.bt-qty').value);
     const price = parseFloat(row.querySelector('.bt-price').value);
     if(title && qty>0 && price>=0){
-      books.push({id: uid(), title, qty, price, payments: []});
+      inputs.push({title, qty, price});
     }
   }
-  if(books.length===0){ alert('Добавьте хотя бы одну книгу с корректным количеством и ценой'); return; }
+  if(inputs.length===0){ alert('Выберите хотя бы одну книгу и укажите корректное количество и цену'); return; }
 
-  const newId = uid();
+  const existingRec = records.find(r=>r.className===className);
+
   try{
-    await recordsCol.doc(newId).set({className, teacher, date, books, createdAt: Date.now()});
+    if(!existingRec){
+      const books = inputs.map(b=>({id: uid(), title:b.title, qty:b.qty, price:b.price, payments: []}));
+      await recordsCol.doc(uid()).set({className, teacher, date, books, createdAt: Date.now()});
+    }else{
+      const books = existingRec.books.map(b=>({...b, payments:[...(b.payments||[])]}));
+      inputs.forEach(inp=>{
+        const match = books.find(b=>b.title===inp.title);
+        if(match){
+          match.qty += inp.qty;
+        }else{
+          books.push({id: uid(), title:inp.title, qty:inp.qty, price:inp.price, payments: []});
+        }
+      });
+      await recordsCol.doc(existingRec.id).update({books, teacher: teacher || existingRec.teacher, date});
+    }
   }catch(e){
     console.error('Save error', e);
     alert('Не удалось сохранить запись. Проверьте интернет-соединение и попробуйте ещё раз.');
