@@ -330,6 +330,18 @@
 </head>
 <body>
 
+<!-- Login screen -->
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-card">
+    <div style="text-align:center;font-size:34px;margin-bottom:6px;">🔒</div>
+    <h2>Вход в систему</h2>
+    <div class="field"><label>Email</label><input type="email" id="authEmail" autocomplete="username"></div>
+    <div class="field"><label>Пароль</label><input type="password" id="authPassword" autocomplete="current-password"></div>
+    <div id="authError" class="auth-error"></div>
+    <button class="btn btn-brass" id="authLoginBtn" style="width:100%;padding:11px;">Войти</button>
+  </div>
+</div>
+
 <header>
   <div class="wrap" style="padding-top:0;padding-bottom:0;position:relative;">
     <span id="connStatus" class="conn-status conn-connecting"><span class="dot"></span>Подключение…</span>
@@ -822,17 +834,6 @@ el('exportBtn').onclick = async ()=>{
 
 // listenData() запускается автоматически после успешного входа (см. auth.onAuthStateChanged)
 </script>
-<!-- Login screen -->
-<div class="auth-overlay" id="authOverlay">
-  <div class="auth-card">
-    <div style="text-align:center;font-size:34px;margin-bottom:6px;">🔒</div>
-    <h2>Вход в систему</h2>
-    <div class="field"><label>Email</label><input type="email" id="authEmail" autocomplete="username"></div>
-    <div class="field"><label>Пароль</label><input type="password" id="authPassword" autocomplete="current-password"></div>
-    <div id="authError" class="auth-error"></div>
-    <button class="btn btn-brass" id="authLoginBtn" style="width:100%;padding:11px;">Войти</button>
-  </div>
-</div>
 
 </body>
 </html>
