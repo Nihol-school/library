@@ -295,6 +295,34 @@
   footer.appfoot{
     text-align:center;color:var(--ink-soft);font-size:12px;padding:20px;
   }
+  .logout-link{
+    position:absolute;top:34px;right:0;
+    font-size:12px;color:#C9C2B2;
+    text-decoration:underline;cursor:pointer;
+    display:none;
+  }
+  .auth-overlay{
+    position:fixed;inset:0;z-index:200;
+    background:var(--ink);
+    display:none;
+    align-items:center;justify-content:center;
+    padding:20px;
+  }
+  .auth-card{
+    background:var(--paper);
+    border-radius:14px;
+    max-width:340px;width:100%;
+    padding:28px 26px;
+    box-shadow:0 25px 60px rgba(0,0,0,.4);
+  }
+  .auth-card h2{font-family:var(--serif);text-align:center;margin:0 0 18px;font-size:21px;}
+  .auth-error{
+    color:var(--brick);font-size:13px;margin:-4px 0 12px;
+    display:none;
+  }
+  @media (max-width:520px){
+    .logout-link{position:static;display:inline-block;margin-bottom:6px;}
+  }
   @media (max-width:520px){
     .bookrow .bf.f-title{flex-basis:100%;}
   }
@@ -305,6 +333,7 @@
 <header>
   <div class="wrap" style="padding-top:0;padding-bottom:0;position:relative;">
     <span id="connStatus" class="conn-status conn-connecting"><span class="dot"></span>Подключение…</span>
+    <span id="logoutBtn" class="logout-link">Выйти</span>
     <h1>📚 Учёт книг библиотеки</h1>
     <p>Приход книг классам и оплата — всё в одном месте</p>
   </div>
@@ -371,6 +400,7 @@
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 let records = [];
 let bookRowCount = 0;
@@ -392,7 +422,45 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
 const recordsCol = db.collection('libraryRecords');
+const auth = firebase.auth();
+let authInitialized = false;
+
+auth.onAuthStateChanged(user=>{
+  if(user){
+    el('authOverlay').style.display = 'none';
+    el('logoutBtn').style.display = 'inline-block';
+    if(!authInitialized){ authInitialized = true; listenData(); }
+  }else{
+    el('authOverlay').style.display = 'flex';
+    el('logoutBtn').style.display = 'none';
+    el('loading').style.display = 'none';
+  }
+});
+
+function doLogin(){
+  const email = el('authEmail').value.trim();
+  const password = el('authPassword').value;
+  const errEl = el('authError');
+  errEl.style.display = 'none';
+  if(!email || !password){ errEl.textContent='Введите email и пароль'; errEl.style.display='block'; return; }
+  auth.signInWithEmailAndPassword(email, password).catch(e=>{
+    const msgs = {
+      'auth/invalid-email':'Некорректный email',
+      'auth/user-not-found':'Пользователь не найден',
+      'auth/wrong-password':'Неверный пароль',
+      'auth/invalid-credential':'Неверный email или пароль',
+      'auth/too-many-requests':'Слишком много попыток, подождите немного'
+    };
+    errEl.textContent = msgs[e.code] || ('Ошибка входа: '+e.message);
+    errEl.style.display = 'block';
+  });
+}
+el('authLoginBtn').onclick = doLogin;
+el('authPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+el('authEmail').addEventListener('keydown', e=>{ if(e.key==='Enter') el('authPassword').focus(); });
+el('logoutBtn').onclick = ()=> auth.signOut();
 
 function setConnStatus(state){
   const elx = el('connStatus');
@@ -422,6 +490,12 @@ function listenData(){
 }
 window.addEventListener('offline', ()=> setConnStatus('offline'));
 window.addEventListener('online', ()=> setConnStatus('connecting'));
+
+setTimeout(()=>{
+  if(el('connStatus').classList.contains('conn-connecting')){
+    el('records').innerHTML = `<div class="empty">⚠️ Не удаётся подключиться к базе данных больше 10 секунд.<br>Проверьте: 1) в Firebase Console база Firestore точно создана и включена; 2) в разделе Rules доступ разрешён (Test mode или ваши правила); 3) интернет-соединение стабильно.</div>`;
+  }
+}, 10000);
 
 function bookCalc(book){
   const sum = book.qty * book.price;
@@ -746,7 +820,19 @@ el('exportBtn').onclick = async ()=>{
   btn.textContent = originalText;
 };
 
-listenData();
+// listenData() запускается автоматически после успешного входа (см. auth.onAuthStateChanged)
 </script>
+<!-- Login screen -->
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-card">
+    <div style="text-align:center;font-size:34px;margin-bottom:6px;">🔒</div>
+    <h2>Вход в систему</h2>
+    <div class="field"><label>Email</label><input type="email" id="authEmail" autocomplete="username"></div>
+    <div class="field"><label>Пароль</label><input type="password" id="authPassword" autocomplete="current-password"></div>
+    <div id="authError" class="auth-error"></div>
+    <button class="btn btn-brass" id="authLoginBtn" style="width:100%;padding:11px;">Войти</button>
+  </div>
+</div>
+
 </body>
 </html>
