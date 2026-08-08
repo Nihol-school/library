@@ -364,14 +364,13 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-const recordsDoc = db.collection('library').doc('records');
-
+const recordsCol = db.collection('libraryRecords');
 
 function listenData(){
-  recordsDoc.onSnapshot(
-    doc=>{
+  recordsCol.onSnapshot(
+    snap=>{
       el('loading').style.display = 'none';
-      records = (doc.exists && doc.data().data) ? doc.data().data : [];
+      records = snap.docs.map(d=>({id:d.id, ...d.data()}));
       render();
     },
     err=>{
@@ -380,15 +379,6 @@ function listenData(){
       el('records').innerHTML = `<div class="empty">⚠️ Не удалось подключиться к базе данных.<br>Проверьте интернет и правила доступа Firestore (Test mode должен быть включён).</div>`;
     }
   );
-}
-
-async function saveData(){
-  try{
-    await recordsDoc.set({data: records});
-  }catch(e){
-    console.error('Save error', e);
-    alert('Не удалось сохранить данные в базу. Проверьте интернет-соединение и правила доступа Firestore.');
-  }
 }
 
 function bookCalc(book){
@@ -544,10 +534,15 @@ el('saveAdd').onclick = async ()=>{
   }
   if(books.length===0){ alert('Добавьте хотя бы одну книгу с корректным количеством и ценой'); return; }
 
-  records.push({id: uid(), className, teacher, date, books, createdAt: Date.now()});
-  await saveData();
+  const newId = uid();
+  try{
+    await recordsCol.doc(newId).set({className, teacher, date, books, createdAt: Date.now()});
+  }catch(e){
+    console.error('Save error', e);
+    alert('Не удалось сохранить запись. Проверьте интернет-соединение и попробуйте ещё раз.');
+    return;
+  }
   el('addOverlay').classList.remove('show');
-  render();
 };
 
 // --- Payment modal ---
@@ -585,25 +580,36 @@ el('savePay').onclick = async ()=>{
   const book = rec.books.find(b=>b.id===payingCtx.bookId);
   book.payments = book.payments || [];
   book.payments.push({qty, amount, date});
-  await saveData();
+  try{
+    await recordsCol.doc(rec.id).update({books: rec.books});
+  }catch(e){
+    console.error('Save error', e);
+    alert('Не удалось сохранить оплату. Проверьте интернет-соединение и попробуйте ещё раз.');
+    return;
+  }
   el('payOverlay').classList.remove('show');
   payingCtx=null;
-  render();
 };
 
 async function deleteRecord(id){
   if(!confirm('Удалить эту запись целиком? Действие необратимо.')) return;
-  records = records.filter(r=>r.id!==id);
-  await saveData();
-  render();
+  try{
+    await recordsCol.doc(id).delete();
+  }catch(e){
+    console.error('Delete error', e);
+    alert('Не удалось удалить запись. Проверьте интернет-соединение и попробуйте ещё раз.');
+  }
 }
 window.deleteRecord = deleteRecord;
 
 el('resetLink').onclick = async ()=>{
   if(!confirm('Удалить ВСЕ данные без возможности восстановления?')) return;
-  records = [];
-  await saveData();
-  render();
+  try{
+    await Promise.all(records.map(r=>recordsCol.doc(r.id).delete()));
+  }catch(e){
+    console.error('Reset error', e);
+    alert('Не удалось удалить все записи. Проверьте интернет-соединение и попробуйте ещё раз.');
+  }
 };
 
 el('search').oninput = render;
