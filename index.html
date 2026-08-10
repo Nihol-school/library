@@ -411,6 +411,20 @@
   </div>
 </div>
 
+<!-- Return modal -->
+<div class="overlay" id="returnOverlay">
+  <div class="modal" style="max-width:380px;">
+    <h2>↩ Возврат книг</h2>
+    <p class="hint" id="returnBookInfo"></p>
+    <div class="field"><label>Сколько шт вернули</label><input type="number" id="returnQty" min="1"></div>
+    <div class="field"><label>Дата возврата</label><input type="date" id="returnDate"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelReturn">Отмена</button>
+      <button class="btn btn-brass" id="saveReturn">Записать возврат</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -514,10 +528,12 @@ setTimeout(()=>{
 }, 10000);
 
 function bookCalc(book){
-  const sum = book.qty * book.price;
+  const returnedQty = (book.returns||[]).reduce((a,r)=>a+r.qty,0);
+  const effQty = book.qty - returnedQty;
+  const sum = effQty * book.price;
   const paidQty = (book.payments||[]).reduce((a,p)=>a+p.qty,0);
   const paidSum = (book.payments||[]).reduce((a,p)=>a+p.amount,0);
-  return {sum, paidQty, paidSum, debtQty: book.qty-paidQty, debtSum: sum-paidSum};
+  return {sum, paidQty, paidSum, debtQty: effQty-paidQty, debtSum: sum-paidSum, returnedQty, effQty};
 }
 
 function recordTotals(rec){
@@ -582,15 +598,17 @@ function render(){
     const t = recordTotals(rec);
     const bookLines = rec.books.map(b=>{
       const c = bookCalc(b);
-      const pct = b.qty>0 ? Math.round((c.paidQty/b.qty)*100) : 0;
+      const pct = c.effQty>0 ? Math.round((c.paidQty/c.effQty)*100) : 0;
       const isPaid = c.debtQty<=0;
       return `
         <div class="book-line">
           <div class="book-title">${escapeHtml(b.title)}</div>
           <div class="dots"></div>
-          <div class="book-nums"><b>${c.paidQty}</b>/${b.qty} шт · <span class="sum">${fmt(c.paidSum)} / ${fmt(c.sum)}</span> сум</div>
+          <div class="book-nums"><b>${c.paidQty}</b>/${c.effQty} шт${c.returnedQty>0?` <span style="color:var(--brass-dark)">(возврат ${c.returnedQty})</span>`:''} · <span class="sum">${fmt(c.paidSum)} / ${fmt(c.sum)}</span> сум</div>
           <span class="badge ${isPaid?'paid':'debt'}">${isPaid?'оплачено':'долг <b>'+fmt(c.debtSum)+'</b> сум'}</span>
           ${!isPaid ? `<button class="btn btn-green btn-sm" onclick="openPay('${rec.id}','${b.id}')">Принять оплату</button>` : ''}
+          ${c.effQty>0 ? `<button class="btn btn-outline btn-sm" onclick="openReturn('${rec.id}','${b.id}')">↩ Возврат</button>` : ''}
+          <button class="icon-btn" onclick="deleteBookLine('${rec.id}','${b.id}')" title="Удалить эту книгу из записи">✕</button>
           <div class="progress"><div style="width:${pct}%"></div></div>
         </div>`;
     }).join('');
@@ -759,8 +777,63 @@ el('savePay').onclick = async ()=>{
   payingCtx=null;
 };
 
+// --- Return modal ---
+let returningCtx = null;
+function openReturn(recordId, bookId){
+  const rec = records.find(r=>r.id===recordId);
+  const book = rec.books.find(b=>b.id===bookId);
+  const c = bookCalc(book);
+  returningCtx = {recordId, bookId, maxQty: c.effQty};
+  el('returnBookInfo').textContent = `${book.title} — сейчас числится ${c.effQty} шт`;
+  el('returnQty').value = '';
+  el('returnQty').max = c.effQty;
+  el('returnDate').value = todayStr();
+  el('returnOverlay').classList.add('show');
+}
+window.openReturn = openReturn;
+
+el('cancelReturn').onclick = ()=> el('returnOverlay').classList.remove('show');
+
+el('saveReturn').onclick = async ()=>{
+  if(!returningCtx) return;
+  const qty = parseFloat(el('returnQty').value);
+  const date = el('returnDate').value || todayStr();
+  if(!(qty>0)){ alert('Укажите количество возврата'); return; }
+  if(qty > returningCtx.maxQty){ alert('Нельзя вернуть больше, чем сейчас числится за классом'); return; }
+
+  const rec = records.find(r=>r.id===returningCtx.recordId);
+  const book = rec.books.find(b=>b.id===returningCtx.bookId);
+  book.returns = book.returns || [];
+  book.returns.push({qty, date});
+  try{
+    await recordsCol.doc(rec.id).update({books: rec.books});
+  }catch(e){
+    console.error('Save error', e);
+    alert('Не удалось сохранить возврат. Проверьте интернет-соединение и попробуйте ещё раз.');
+    return;
+  }
+  el('returnOverlay').classList.remove('show');
+  returningCtx=null;
+};
+
+async function confirmPassword(){
+  const password = prompt('Для подтверждения удаления введите ваш пароль от входа:');
+  if(!password) return false;
+  try{
+    const user = auth.currentUser;
+    const cred = firebase.auth.EmailAuthProvider.credential(user.email, password);
+    await user.reauthenticateWithCredential(cred);
+    return true;
+  }catch(e){
+    alert('Неверный пароль. Удаление отменено.');
+    return false;
+  }
+}
+
 async function deleteRecord(id){
   if(!confirm('Удалить эту запись целиком? Действие необратимо.')) return;
+  const ok = await confirmPassword();
+  if(!ok) return;
   try{
     await recordsCol.doc(id).delete();
   }catch(e){
@@ -770,8 +843,29 @@ async function deleteRecord(id){
 }
 window.deleteRecord = deleteRecord;
 
+async function deleteBookLine(recordId, bookId){
+  if(!confirm('Удалить эту книгу из записи? Действие необратимо.')) return;
+  const ok = await confirmPassword();
+  if(!ok) return;
+  const rec = records.find(r=>r.id===recordId);
+  const books = rec.books.filter(b=>b.id!==bookId);
+  try{
+    if(books.length===0){
+      await recordsCol.doc(recordId).delete();
+    }else{
+      await recordsCol.doc(recordId).update({books});
+    }
+  }catch(e){
+    console.error('Delete error', e);
+    alert('Не удалось удалить книгу. Проверьте интернет-соединение и попробуйте ещё раз.');
+  }
+}
+window.deleteBookLine = deleteBookLine;
+
 el('resetLink').onclick = async ()=>{
   if(!confirm('Удалить ВСЕ данные без возможности восстановления?')) return;
+  const ok = await confirmPassword();
+  if(!ok) return;
   try{
     await Promise.all(records.map(r=>recordsCol.doc(r.id).delete()));
   }catch(e){
@@ -814,16 +908,20 @@ el('exportBtn').onclick = async ()=>{
     return;
   }
 
-  const mainRows = [['Дата','Класс','Учитель','Книга','Цена (сум)','Кол-во','Сумма (сум)','Оплачено (шт)','Оплачено (сум)','Долг (шт)','Долг (сум)']];
+  const mainRows = [['Дата','Класс','Учитель','Книга','Цена (сум)','Взято (шт)','Возврат (шт)','Сумма (сум)','Оплачено (шт)','Оплачено (сум)','Долг (шт)','Долг (сум)']];
   const payRows = [['Дата оплаты','Класс','Учитель','Книга','Кол-во','Сумма (сум)']];
+  const returnRows = [['Дата возврата','Класс','Учитель','Книга','Кол-во возврата']];
   const summaryMap = {};
 
   records.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(rec=>{
     rec.books.forEach(b=>{
       const c = bookCalc(b);
-      mainRows.push([rec.date, rec.className, rec.teacher, b.title, b.price, b.qty, c.sum, c.paidQty, c.paidSum, c.debtQty, c.debtSum]);
+      mainRows.push([rec.date, rec.className, rec.teacher, b.title, b.price, b.qty, c.returnedQty, c.sum, c.paidQty, c.paidSum, c.debtQty, c.debtSum]);
       (b.payments||[]).forEach(p=>{
         payRows.push([p.date, rec.className, rec.teacher, b.title, p.qty, p.amount]);
+      });
+      (b.returns||[]).forEach(r=>{
+        returnRows.push([r.date, rec.className, rec.teacher, b.title, r.qty]);
       });
       const key = rec.className+' | '+rec.teacher;
       if(!summaryMap[key]) summaryMap[key] = {className:rec.className, teacher:rec.teacher, sum:0, paid:0, debt:0};
@@ -833,12 +931,12 @@ el('exportBtn').onclick = async ()=>{
     });
   });
 
-  const totalRow = ['','','','ИТОГО','','',
-    mainRows.slice(1).reduce((a,r)=>a+r[6],0),
+  const totalRow = ['','','','ИТОГО','','','',
     mainRows.slice(1).reduce((a,r)=>a+r[7],0),
     mainRows.slice(1).reduce((a,r)=>a+r[8],0),
     mainRows.slice(1).reduce((a,r)=>a+r[9],0),
-    mainRows.slice(1).reduce((a,r)=>a+r[10],0)];
+    mainRows.slice(1).reduce((a,r)=>a+r[10],0),
+    mainRows.slice(1).reduce((a,r)=>a+r[11],0)];
   mainRows.push(totalRow);
 
   const summaryRows = [['Класс','Учитель','Сумма (сум)','Оплачено (сум)','Долг (сум)']];
@@ -848,15 +946,18 @@ el('exportBtn').onclick = async ()=>{
 
   const wb = XLSX.utils.book_new();
   const ws1 = XLSX.utils.aoa_to_sheet(mainRows);
-  ws1['!cols'] = [{wch:11},{wch:8},{wch:20},{wch:26},{wch:9},{wch:8},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10}];
+  ws1['!cols'] = [{wch:11},{wch:8},{wch:20},{wch:26},{wch:9},{wch:9},{wch:11},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10}];
   const ws2 = XLSX.utils.aoa_to_sheet(summaryRows);
   ws2['!cols'] = [{wch:8},{wch:22},{wch:12},{wch:12},{wch:12}];
   const ws3 = XLSX.utils.aoa_to_sheet(payRows);
   ws3['!cols'] = [{wch:12},{wch:8},{wch:20},{wch:26},{wch:8},{wch:10}];
+  const ws4 = XLSX.utils.aoa_to_sheet(returnRows);
+  ws4['!cols'] = [{wch:12},{wch:8},{wch:20},{wch:26},{wch:12}];
 
   XLSX.utils.book_append_sheet(wb, ws1, 'Отчёт');
   XLSX.utils.book_append_sheet(wb, ws2, 'Сводка по классам');
   XLSX.utils.book_append_sheet(wb, ws3, 'История оплат');
+  XLSX.utils.book_append_sheet(wb, ws4, 'История возвратов');
 
   const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
   const blob = new Blob([wbout], {type:'application/octet-stream'});
