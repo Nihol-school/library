@@ -109,6 +109,41 @@
   .stat.debt .val{color:var(--brick);}
   .stat.paid .val{color:var(--green);}
 
+  .stock-panel{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:10px;
+    margin-bottom:16px;
+    box-shadow:var(--card-shadow);
+    overflow:hidden;
+  }
+  .stock-head{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:12px 16px;cursor:pointer;
+  }
+  .stock-head h3{font-family:var(--serif);margin:0;font-size:16px;}
+  .stock-chevron{transition:transform .15s;color:var(--ink-soft);}
+  .stock-panel.collapsed .stock-chevron{transform:rotate(-90deg);}
+  .stock-panel.collapsed .stock-body{display:none;}
+  .stock-body{padding:0 16px 16px;}
+  .stock-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
+    gap:8px;margin-bottom:12px;
+  }
+  .stock-item{
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:9px 12px;
+    display:flex;justify-content:space-between;align-items:center;
+    gap:8px;
+  }
+  .stock-item .st-name{font-size:13px;font-weight:600;line-height:1.25;}
+  .stock-item .st-qty{font-family:var(--mono);font-weight:800;font-size:17px;white-space:nowrap;}
+  .stock-item.low{border-color:var(--brick);background:var(--brick-soft);}
+  .stock-item.low .st-qty{color:var(--brick);}
+  .stock-item.ok .st-qty{color:var(--green);}
+
   .toolbar{
     display:flex;
     flex-wrap:wrap;
@@ -355,6 +390,17 @@
 <div class="wrap">
   <div class="cards" id="stats"></div>
 
+  <div class="stock-panel" id="stockPanel">
+    <div class="stock-head" id="stockToggle">
+      <h3>📦 Склад книг</h3>
+      <span class="stock-chevron" id="stockChevron">▾</span>
+    </div>
+    <div class="stock-body" id="stockBody">
+      <div class="stock-grid" id="stockGrid"></div>
+      <button class="btn btn-brass btn-sm" id="stockAddBtn">+ Пополнить склад</button>
+    </div>
+  </div>
+
   <div class="toolbar">
     <input type="text" id="search" placeholder="Поиск: класс, учитель, книга…">
     <select id="filterClass"><option value="all">Все классы</option></select>
@@ -369,6 +415,19 @@
 
   <div id="loading" style="text-align:center;color:var(--ink-soft);padding:30px;">Загрузка данных…</div>
   <div id="records"></div>
+</div>
+
+<!-- Stock add modal -->
+<div class="overlay" id="stockOverlay">
+  <div class="modal" style="max-width:380px;">
+    <h2>📦 Пополнить склад</h2>
+    <div class="field"><label>Книга</label><select id="stockBook"></select></div>
+    <div class="field"><label>Сколько шт поступило</label><input type="number" id="stockQty" min="1"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelStock">Отмена</button>
+      <button class="btn btn-brass" id="saveStock">Добавить на склад</button>
+    </div>
+  </div>
 </div>
 
 <footer class="appfoot">Данные хранятся в базе Firebase и обновляются в реальном времени на всех устройствах · <span id="resetLink" style="text-decoration:underline;cursor:pointer;">очистить все данные</span></footer>
@@ -454,14 +513,16 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
 const recordsCol = db.collection('libraryRecords');
+const stockDoc = db.collection('libraryStock').doc('current');
 const auth = firebase.auth();
 let authInitialized = false;
+let stock = {};
 
 auth.onAuthStateChanged(user=>{
   if(user){
     el('authOverlay').style.display = 'none';
     el('logoutBtn').style.display = 'inline-block';
-    if(!authInitialized){ authInitialized = true; listenData(); }
+    if(!authInitialized){ authInitialized = true; listenData(); listenStock(); }
   }else{
     el('authOverlay').style.display = 'flex';
     el('logoutBtn').style.display = 'none';
@@ -518,6 +579,25 @@ function listenData(){
     }
   );
 }
+function listenStock(){
+  stockDoc.onSnapshot(
+    doc=>{
+      stock = doc.exists ? (doc.data()||{}) : {};
+      renderStock();
+    },
+    err=>{ console.error('Stock error', err); }
+  );
+}
+
+function renderStock(){
+  const grid = el('stockGrid');
+  grid.innerHTML = BOOKS.map(title=>{
+    const qty = stock[title] || 0;
+    const cls = qty<=5 ? 'low' : 'ok';
+    return `<div class="stock-item ${cls}"><span class="st-name">${escapeHtml(title)}</span><span class="st-qty">${fmt(qty)}</span></div>`;
+  }).join('');
+}
+
 window.addEventListener('offline', ()=> setConnStatus('offline'));
 window.addEventListener('online', ()=> setConnStatus('connecting'));
 
@@ -649,7 +729,10 @@ function updateRowHint(row){
   if(!cls || !title){ hintEl.textContent=''; return; }
   const rec = records.find(r=>r.className===cls);
   const existing = rec ? rec.books.find(b=>b.title===title) : null;
-  hintEl.textContent = existing ? `уже есть ${existing.qty} шт — новое кол-во прибавится к этому` : 'новая книга для этого класса';
+  const stockQty = stock[title] || 0;
+  const parts = [`на складе: ${stockQty} шт`];
+  if(existing) parts.push(`уже выдано ${existing.qty} шт — новое кол-во прибавится`);
+  hintEl.textContent = parts.join(' · ');
 }
 
 function addBookRow(prefill){
@@ -705,6 +788,12 @@ el('saveAdd').onclick = async ()=>{
   }
   if(inputs.length===0){ alert('Выберите хотя бы одну книгу и укажите корректное количество и цену'); return; }
 
+  const shortages = inputs.filter(inp => inp.qty > (stock[inp.title]||0));
+  if(shortages.length>0){
+    const msg = shortages.map(s=>`«${s.title}»: нужно ${s.qty}, на складе ${stock[s.title]||0}`).join('\n');
+    if(!confirm('На складе не хватает:\n'+msg+'\n\nВсё равно выдать?')) return;
+  }
+
   const existingRec = records.find(r=>r.className===className);
 
   try{
@@ -723,6 +812,9 @@ el('saveAdd').onclick = async ()=>{
       });
       await recordsCol.doc(existingRec.id).update({books, teacher: teacher || existingRec.teacher, date});
     }
+    const stockUpdate = {};
+    inputs.forEach(inp=>{ stockUpdate[inp.title] = firebase.firestore.FieldValue.increment(-inp.qty); });
+    await stockDoc.set(stockUpdate, {merge:true});
   }catch(e){
     console.error('Save error', e);
     alert('Не удалось сохранить запись. Проверьте интернет-соединение и попробуйте ещё раз.');
@@ -807,6 +899,7 @@ el('saveReturn').onclick = async ()=>{
   book.returns.push({qty, date});
   try{
     await recordsCol.doc(rec.id).update({books: rec.books});
+    await stockDoc.set({ [book.title]: firebase.firestore.FieldValue.increment(qty) }, {merge:true});
   }catch(e){
     console.error('Save error', e);
     alert('Не удалось сохранить возврат. Проверьте интернет-соединение и попробуйте ещё раз.');
@@ -834,8 +927,15 @@ async function deleteRecord(id){
   if(!confirm('Удалить эту запись целиком? Действие необратимо.')) return;
   const ok = await confirmPassword();
   if(!ok) return;
+  const rec = records.find(r=>r.id===id);
   try{
     await recordsCol.doc(id).delete();
+    const stockUpdate = {};
+    rec.books.forEach(b=>{
+      const eff = bookCalc(b).effQty;
+      if(eff>0) stockUpdate[b.title] = firebase.firestore.FieldValue.increment(eff);
+    });
+    if(Object.keys(stockUpdate).length>0) await stockDoc.set(stockUpdate, {merge:true});
   }catch(e){
     console.error('Delete error', e);
     alert('Не удалось удалить запись. Проверьте интернет-соединение и попробуйте ещё раз.');
@@ -848,6 +948,7 @@ async function deleteBookLine(recordId, bookId){
   const ok = await confirmPassword();
   if(!ok) return;
   const rec = records.find(r=>r.id===recordId);
+  const bookToRemove = rec.books.find(b=>b.id===bookId);
   const books = rec.books.filter(b=>b.id!==bookId);
   try{
     if(books.length===0){
@@ -855,6 +956,8 @@ async function deleteBookLine(recordId, bookId){
     }else{
       await recordsCol.doc(recordId).update({books});
     }
+    const eff = bookCalc(bookToRemove).effQty;
+    if(eff>0) await stockDoc.set({ [bookToRemove.title]: firebase.firestore.FieldValue.increment(eff) }, {merge:true});
   }catch(e){
     console.error('Delete error', e);
     alert('Не удалось удалить книгу. Проверьте интернет-соединение и попробуйте ещё раз.');
@@ -877,6 +980,30 @@ el('resetLink').onclick = async ()=>{
 el('search').oninput = render;
 el('filterDebt').onchange = render;
 el('filterClass').onchange = render;
+
+// --- Stock panel ---
+el('stockToggle').onclick = ()=> el('stockPanel').classList.toggle('collapsed');
+
+el('stockAddBtn').onclick = ()=>{
+  el('stockBook').innerHTML = BOOKS.map(b=>`<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('');
+  el('stockQty').value = '';
+  el('stockOverlay').classList.add('show');
+};
+el('cancelStock').onclick = ()=> el('stockOverlay').classList.remove('show');
+
+el('saveStock').onclick = async ()=>{
+  const title = el('stockBook').value;
+  const qty = parseInt(el('stockQty').value);
+  if(!title || !(qty>0)){ alert('Выберите книгу и укажите количество'); return; }
+  try{
+    await stockDoc.set({ [title]: firebase.firestore.FieldValue.increment(qty) }, {merge:true});
+  }catch(e){
+    console.error('Stock save error', e);
+    alert('Не удалось обновить склад. Проверьте интернет-соединение.');
+    return;
+  }
+  el('stockOverlay').classList.remove('show');
+};
 
 // --- Excel export (библиотека xlsx подгружается только сейчас, чтобы не тормозить открытие страницы) ---
 let xlsxLoading = null;
