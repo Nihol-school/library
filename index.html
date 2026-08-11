@@ -398,6 +398,7 @@
     <div class="stock-body" id="stockBody">
       <div class="stock-grid" id="stockGrid"></div>
       <button class="btn btn-brass btn-sm" id="stockAddBtn">+ Пополнить склад</button>
+      <button class="btn btn-outline btn-sm" id="stockRemoveBtn">− Списать со склада</button>
     </div>
   </div>
 
@@ -417,12 +418,13 @@
   <div id="records"></div>
 </div>
 
-<!-- Stock add modal -->
+<!-- Stock add/remove modal -->
 <div class="overlay" id="stockOverlay">
   <div class="modal" style="max-width:380px;">
-    <h2>📦 Пополнить склад</h2>
+    <h2 id="stockModalTitle">📦 Пополнить склад</h2>
     <div class="field"><label>Книга</label><select id="stockBook"></select></div>
-    <div class="field"><label>Сколько шт поступило</label><input type="number" id="stockQty" min="1"></div>
+    <div class="field"><label id="stockQtyLabel">Сколько шт поступило</label><input type="number" id="stockQty" min="1"></div>
+    <div class="hint" id="stockCurrentHint"></div>
     <div class="modal-actions">
       <button class="btn btn-outline" id="cancelStock">Отмена</button>
       <button class="btn btn-brass" id="saveStock">Добавить на склад</button>
@@ -984,19 +986,59 @@ el('filterClass').onchange = render;
 // --- Stock panel ---
 el('stockToggle').onclick = ()=> el('stockPanel').classList.toggle('collapsed');
 
-el('stockAddBtn').onclick = ()=>{
+let stockMode = 'add';
+
+function fillStockBookOptions(){
   el('stockBook').innerHTML = BOOKS.map(b=>`<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('');
+}
+function updateStockHint(){
+  const title = el('stockBook').value;
+  const cur = stock[title] || 0;
+  el('stockCurrentHint').textContent = `сейчас на складе: ${cur} шт`;
+}
+el('stockBook').addEventListener('change', updateStockHint);
+
+el('stockAddBtn').onclick = ()=>{
+  stockMode = 'add';
+  fillStockBookOptions();
   el('stockQty').value = '';
+  el('stockModalTitle').textContent = '📦 Пополнить склад';
+  el('stockQtyLabel').textContent = 'Сколько шт поступило';
+  el('saveStock').textContent = 'Добавить на склад';
+  el('saveStock').className = 'btn btn-brass';
+  updateStockHint();
   el('stockOverlay').classList.add('show');
 };
+
+el('stockRemoveBtn').onclick = ()=>{
+  stockMode = 'remove';
+  fillStockBookOptions();
+  el('stockQty').value = '';
+  el('stockModalTitle').textContent = '📦 Списать со склада';
+  el('stockQtyLabel').textContent = 'Сколько шт списать';
+  el('saveStock').textContent = 'Списать';
+  el('saveStock').className = 'btn btn-brick';
+  updateStockHint();
+  el('stockOverlay').classList.add('show');
+};
+
 el('cancelStock').onclick = ()=> el('stockOverlay').classList.remove('show');
 
 el('saveStock').onclick = async ()=>{
   const title = el('stockBook').value;
   const qty = parseInt(el('stockQty').value);
   if(!title || !(qty>0)){ alert('Выберите книгу и укажите количество'); return; }
+
+  if(stockMode==='remove'){
+    const cur = stock[title] || 0;
+    if(qty > cur){ if(!confirm(`На складе только ${cur} шт «${title}». Всё равно списать ${qty}?`)) return; }
+    const ok = await confirmPassword();
+    if(!ok) return;
+  }
+
   try{
-    await stockDoc.set({ [title]: firebase.firestore.FieldValue.increment(qty) }, {merge:true});
+    const delta = stockMode==='remove' ? -qty : qty;
+    await stockDoc.set({ [title]: firebase.firestore.FieldValue.increment(delta) }, {merge:true});
   }catch(e){
     console.error('Stock save error', e);
     alert('Не удалось обновить склад. Проверьте интернет-соединение.');
